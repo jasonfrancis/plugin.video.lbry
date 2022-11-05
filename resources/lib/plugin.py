@@ -773,9 +773,19 @@ def plugin_playlist_del(name,uri):
     save_playlist(name, items)
     xbmc.executebuiltin('Container.Refresh')
 
+def load_api_channel_subs():
+    preference_result = call_rpc('preference_get')
+    # Those come back as an arry of string like "lbry://@PukeBomb#f37340d1ee00b06746d85cfa8e7b6ee0318b76b9"
+    # We want to remove the "lbry://" from the front.
+    cleaned_result = [sub.replace("lbry://", "", 1).split("#") for sub in preference_result["shared"]["value"]["subscriptions"]]
+    # Weed out malformed records.
+    return [t for t in cleaned_result if len(t) > 1]
+
 @plugin.route('/follows')
 def plugin_follows():
-    channels = load_channel_subs()
+    # channels = load_channel_subs()
+    channels = load_api_channel_subs()
+
     resolve_uris = []
     for (name,claim_id) in channels:
         resolve_uris.append(name+'#'+claim_id)
@@ -813,7 +823,8 @@ def plugin_follows():
 @plugin.route('/recent/<page>')
 def plugin_recent(page):
     page = int(page)
-    channels = load_channel_subs()
+    # channels = load_channel_subs()
+    channels = load_api_channel_subs()
     channel_ids = []
     for (name,claim_id) in channels:
         channel_ids.append(claim_id)
