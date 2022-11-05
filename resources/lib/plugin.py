@@ -728,6 +728,42 @@ class CommentWindow(WindowXML):
     def neutral(self, comment_id, current_vote):
         self.react(comment_id, current_vote=current_vote)
 
+def load_api_channel_subs():
+    preference_result = call_rpc('preference_get')
+    # Those come back as an arry of string like "lbry://@PukeBomb#f37340d1ee00b06746d85cfa8e7b6ee0318b76b9"
+    # We want to remove the "lbry://" from the front.
+    cleaned_result = [sub.replace("lbry://", "", 1).split("#") for sub in preference_result["shared"]["value"]["subscriptions"]]
+    # Weed out malformed records.
+    return [t for t in cleaned_result if len(t) > 1]
+
+def load_api_playlist(name):
+    preference_result = call_rpc('preference_get')
+    # find the playlist, if any that matches proivided name
+    # The preference object that comes back has some baked-in lists and the user's personal lists.
+    # We need to aggregate them.
+    name = unquote_plus(name)
+    aggregated_playlists = []
+    if("builtinCollections" in preference_result["shared"]["value"]):
+        if("favorites" in preference_result["shared"]["value"]["builtinCollections"]):
+            aggregated_playlists.append(preference_result["shared"]["value"]["builtinCollections"]["favorites"])
+        if("watchlater" in preference_result["shared"]["value"]["builtinCollections"]):
+            aggregated_playlists.append(preference_result["shared"]["value"]["builtinCollections"]["watchlater"])
+    if("editedCollections" in preference_result["shared"]["value"]):
+        aggregated_playlists.extend([value for key, value in preference_result["shared"]["value"]["editedCollections"].items()])
+    #xbmc.log(f"details(API): {aggregated_playlists}", xbmc.LOGINFO)
+
+    # get the list of videos for all entries named 'name'
+    raw_result = []
+    for playlist in aggregated_playlists:
+        if playlist["name"] == name:
+            for item in playlist["items"]:
+                raw_result.append(item)
+    result = [item.replace("lbry://", "", 1) for item in raw_result]
+    # xbmc.log(f"details(API): {result}", xbmc.LOGINFO)
+    return result
+    
+
+
 @plugin.route('/')
 def lbry_root():
     addDirectoryItem(ph, plugin.url_for(plugin_follows), ListItem(tr(30200)), True)
@@ -745,8 +781,9 @@ def lbry_root():
 
 @plugin.route('/playlist/list/<name>')
 def plugin_playlist(name):
-    name = unquote_plus(name)
-    uris = load_playlist(name)
+    # name = unquote_plus(name)
+    # uris = load_playlist(name)
+    uris = load_api_playlist(name)
     claim_info = call_rpc('resolve', {'urls': uris})
     items = []
     for uri in uris:
@@ -773,13 +810,6 @@ def plugin_playlist_del(name,uri):
     save_playlist(name, items)
     xbmc.executebuiltin('Container.Refresh')
 
-def load_api_channel_subs():
-    preference_result = call_rpc('preference_get')
-    # Those come back as an arry of string like "lbry://@PukeBomb#f37340d1ee00b06746d85cfa8e7b6ee0318b76b9"
-    # We want to remove the "lbry://" from the front.
-    cleaned_result = [sub.replace("lbry://", "", 1).split("#") for sub in preference_result["shared"]["value"]["subscriptions"]]
-    # Weed out malformed records.
-    return [t for t in cleaned_result if len(t) > 1]
 
 @plugin.route('/follows')
 def plugin_follows():
