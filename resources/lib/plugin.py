@@ -761,6 +761,16 @@ def load_api_playlist(name):
     result = [item.replace("lbry://", "", 1) for item in raw_result]
     # xbmc.log(f"details(API): {result}", xbmc.LOGINFO)
     return result
+
+
+def addDirectoryItemsForApiPlaylists():
+    collections_result = call_rpc('collection_list')
+    if("items" not in collections_result):
+        xbmc.log(f"addDirectoryItemsForApiPlaylists() got a result with no 'items' in the result JSON.", xbmc.LOGERROR)
+        dialog.notification("Playlists", "Unexpected result from API.", NOTIFICATION_ERROR)
+        raise "Unexpected JSON from API."
+    for item in collections_result["items"]:
+        addDirectoryItem(ph, "/playlist/list/" + item["claim_id"], ListItem(item["value"]["title"]), True)
     
 
 
@@ -768,16 +778,19 @@ def load_api_playlist(name):
 def lbry_root():
     addDirectoryItem(ph, plugin.url_for(plugin_follows), ListItem(tr(30200)), True)
     addDirectoryItem(ph, plugin.url_for(plugin_recent, page=1), ListItem(tr(30218)), True)
-    #addDirectoryItem(ph, plugin.url_for(plugin_playlists), ListItem(tr(30210)), True)
+    addDirectoryItem(ph, plugin.url_for(plugin_playlists), ListItem(tr(30210)), True)
     addDirectoryItem(ph, plugin.url_for(plugin_playlist, name=quote_plus(tr(30211))), ListItem(tr(30211)), True)
     #addDirectoryItem(ph, plugin.url_for(lbry_new, page=1), ListItem(tr(30202)), True)
     addDirectoryItem(ph, plugin.url_for(lbry_search), ListItem(tr(30201)), True)
     endOfDirectory(ph)
 
-#@plugin.route('/playlists')
-#def plugin_playlists():
-#    addDirectoryItem(ph, plugin.url_for(plugin_playlist, name=quote_plus(tr(30211))), ListItem(tr(30211)), True)
-#    endOfDirectory(ph)
+@plugin.route('/playlists')
+def plugin_playlists():
+   # Manually specifies "Watch Later" list found in 'preference_get'
+   addDirectoryItem(ph, plugin.url_for(plugin_playlist, name=quote_plus(tr(30211))), ListItem(tr(30211)), True)
+   # all other playlists have to be fetched using 'collection_list'
+   addDirectoryItemsForApiPlaylists()
+   endOfDirectory(ph)
 
 @plugin.route('/playlist/list/<name>')
 def plugin_playlist(name):
