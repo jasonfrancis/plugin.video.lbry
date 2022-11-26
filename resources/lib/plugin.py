@@ -39,7 +39,7 @@ dialog = Dialog()
 
 def call_rpc(method, params={}, errdialog=True):
     try:
-        xbmc.log('call_rpc: url=' + lbry_api_url + ', method=' + method + ', params=' + str(params))
+        xbmc.log('call_rpc: url=' + lbry_api_url + ', method=' + method + ', params=' + str(params), xbmc.LOGINFO)
         headers = {'content-type' : 'application/json'}
         json = { 'jsonrpc' : '2.0', 'id' : 1, 'method': method, 'params': params }
         result = requests.post(lbry_api_url, headers=headers, json=json)
@@ -196,17 +196,20 @@ def to_video_listitem(item, playlist='', channel='', repost=None):
     return li
 
 def result_to_itemlist(result, playlist='', channel=''):
+    xbmc.log("result_to_itemlist() invoked.", xbmc.LOGINFO)
     items = []
     for item in result:
         if not 'value_type' in item:
-            xbmc.log(str(item))
+            xbmc.log("\t" + str(item) + " does not contain 'value_type'", xbmc.LOGINFO)
             continue
         if item['value_type'] == 'stream' and 'stream_type' in item['value'] and item['value']['stream_type'] == 'video':
+            xbmc.log(f"\tFrom in the stream.video condition.", xbmc.LOGINFO)
             # nsfw?
             if 'tags' in item['value']:
                 if 'mature' in item['value']['tags'] and not nsfw:
+                    xbmc.log("No lewds, dudes.", xbmc.LOGINFO)
                     continue
-
+            xbmc.log("\tCalling to_video_listitem()", xbmc.LOGINFO)
             li = to_video_listitem(item, playlist, channel)
             url = plugin.url_for(claim_play, uri=serialize_uri(item))
 
@@ -736,30 +739,47 @@ def load_api_channel_subs():
     # Weed out malformed records.
     return [t for t in cleaned_result if len(t) > 1]
 
-def load_api_playlist(name):
+def load_api_builtin_collections(collectionName):
+    xbmc.log(f"Fetching built-in collection: {collectionName}", xbmc.LOGINFO)
     preference_result = call_rpc('preference_get')
-    # find the playlist, if any that matches proivided name
-    # The preference object that comes back has some baked-in lists and the user's personal lists.
-    # We need to aggregate them.
-    name = unquote_plus(name)
-    aggregated_playlists = []
+    result = []
     if("builtinCollections" in preference_result["shared"]["value"]):
-        if("favorites" in preference_result["shared"]["value"]["builtinCollections"]):
-            aggregated_playlists.append(preference_result["shared"]["value"]["builtinCollections"]["favorites"])
-        if("watchlater" in preference_result["shared"]["value"]["builtinCollections"]):
-            aggregated_playlists.append(preference_result["shared"]["value"]["builtinCollections"]["watchlater"])
-    if("editedCollections" in preference_result["shared"]["value"]):
-        aggregated_playlists.extend([value for key, value in preference_result["shared"]["value"]["editedCollections"].items()])
-    #xbmc.log(f"details(API): {aggregated_playlists}", xbmc.LOGINFO)
+        if(f"{collectionName}" in preference_result["shared"]["value"]["builtinCollections"]):
+            for item in preference_result["shared"]["value"]["builtinCollections"][collectionName]["items"]:
+                sanitizedValue = item.replace("lbry://", "", 1)
+                result.append(sanitizedValue)
+        else:
+            xbmc.log(f"No value found for \"{collectionName}\" in shared.value.builtinCollections", xbmc.LOGWARNING)
+            dialog.notification("Favorites", f"{collectionName} not found in user preferences.", xbmcgui.NOTIFICATION_INFO)
+    else:
+        xbmc.log("No value found for \"builtinCollections\" in shared.value", xbmc.LOGWARNING)
+        dialog.notification("Favorites", "builtinCollections not found in user preferences.", xbmcgui.NOTIFICATION_INFO)
+    xbmc.log(f"Built-in collection {collectionName} contains {len(result)} items.", xbmc.LOGINFO)
+    return result
 
-    # get the list of videos for all entries named 'name'
-    raw_result = []
-    for playlist in aggregated_playlists:
-        if playlist["name"] == name:
-            for item in playlist["items"]:
-                raw_result.append(item)
-    result = [item.replace("lbry://", "", 1) for item in raw_result]
-    # xbmc.log(f"details(API): {result}", xbmc.LOGINFO)
+def load_api_playlist(name:str, page:int):
+    xbmc.log(f"\tload_api_playlist(\"{name}\", {page})", xbmc.LOGINFO)
+    # ensure page is an int for API calls
+    page = page if isinstance(page, int) else int(page)
+    xbmc.log(f"\tA {page}", xbmc.LOGINFO)
+    playlist_result = call_rpc("collection_resolve", { "claim_id": name, "page": page })
+    xbmc.log(f"\tB", xbmc.LOGINFO)
+    if("items" not in playlist_result):
+        xbmc.log(f"load_api_playlist({name}, {page}) got a result with no 'items' in the result JSON.", xbmc.LOGERROR)
+        dialog.notification("Playlists", "Unexpected result from API.", NOTIFICATION_ERROR)
+        raise "Unexpected JSON from API."
+   
+    xbmc.log(f"\tC", xbmc.LOGINFO)
+    result = result_to_itemlist(playlist_result["items"], name)
+   
+    xbmc.log(f"\tRecords found: {len(result)}", xbmc.LOGINFO)
+    # If this is not the next page we need to include a link to the next page of results.
+    if(int(page) < int(playlist_result["total_pages"])):
+        playlistPath = plugin.url_for(plugin_playlist, name=name, page=page+1)
+        displayName = tr(30203)#"Next Page"
+        xbmc.log(f"Adding directory item: {playlistPath}", xbmc.LOGINFO)
+        if not addDirectoryItem(ph, playlistPath, ListItem(displayName), True):
+            raise(f"Failed adding directory item: {playlistPath}")
     return result
 
 
@@ -770,40 +790,59 @@ def addDirectoryItemsForApiPlaylists():
         dialog.notification("Playlists", "Unexpected result from API.", NOTIFICATION_ERROR)
         raise "Unexpected JSON from API."
     for item in collections_result["items"]:
-        addDirectoryItem(ph, "/playlist/list/" + item["claim_id"], ListItem(item["value"]["title"]), True)
+        playlistPath = plugin.url_for(plugin_playlist, name=item['claim_id'], page=1)
+        xbmc.log(f"Adding directory item: {playlistPath}", xbmc.LOGINFO)
+        if not addDirectoryItem(ph, playlistPath, ListItem(item["value"]["title"]), True):
+            raise(f"Failed adding directory item: /playlist/list/{item['claim_id']}")
     
-
+def claim_ids_to_directory_items(playlist_name:str, claim_ids):
+    claim_info = call_rpc('resolve', {'urls': claim_ids})
+    items = []
+    for uri in claim_ids:
+        items.append(claim_info[uri])
+    items = result_to_itemlist(items, playlist=playlist_name)
+    addDirectoryItems(ph, items, items_per_page)
+    endOfDirectory(ph)
 
 @plugin.route('/')
 def lbry_root():
     addDirectoryItem(ph, plugin.url_for(plugin_follows), ListItem(tr(30200)), True)
     addDirectoryItem(ph, plugin.url_for(plugin_recent, page=1), ListItem(tr(30218)), True)
     addDirectoryItem(ph, plugin.url_for(plugin_playlists), ListItem(tr(30210)), True)
-    addDirectoryItem(ph, plugin.url_for(plugin_playlist, name=quote_plus(tr(30211))), ListItem(tr(30211)), True)
+    addDirectoryItem(ph, plugin.url_for(plugin_watch_later), ListItem(tr(30211)), True)
+    addDirectoryItem(ph, plugin.url_for(plugin_favorites), ListItem(tr(30247)), True)
     #addDirectoryItem(ph, plugin.url_for(lbry_new, page=1), ListItem(tr(30202)), True)
     addDirectoryItem(ph, plugin.url_for(lbry_search), ListItem(tr(30201)), True)
     endOfDirectory(ph)
 
+@plugin.route('/watchlater')
+def plugin_watch_later():
+    xbmc.log("Ding!", xbmc.LOGWARNING)
+    uris = load_api_builtin_collections("watchlater")
+    claim_ids_to_directory_items("watch+later", uris)
+
+@plugin.route('/favorites')
+def plugin_favorites():
+    xbmc.log("Dong!", xbmc.LOGWARNING)
+    uris = load_api_builtin_collections("favorites")
+    claim_ids_to_directory_items("favorites", uris)
+
 @plugin.route('/playlists')
 def plugin_playlists():
-   # Manually specifies "Watch Later" list found in 'preference_get'
-   addDirectoryItem(ph, plugin.url_for(plugin_playlist, name=quote_plus(tr(30211))), ListItem(tr(30211)), True)
    # all other playlists have to be fetched using 'collection_list'
    addDirectoryItemsForApiPlaylists()
    endOfDirectory(ph)
 
-@plugin.route('/playlist/list/<name>')
-def plugin_playlist(name):
+@plugin.route('/playlist/list/<name>/<page>')
+def plugin_playlist(name, page):
     # name = unquote_plus(name)
     # uris = load_playlist(name)
-    uris = load_api_playlist(name)
-    claim_info = call_rpc('resolve', {'urls': uris})
-    items = []
-    for uri in uris:
-        items.append(claim_info[uri])
-    items = result_to_itemlist(items, playlist=name)
-    addDirectoryItems(ph, items, items_per_page)
-    endOfDirectory(ph)
+    uris = load_api_playlist(name, page)
+    xbmc.log(f"Adding the {len(uris)} playlist Directory Items.", xbmc.LOGINFO)
+    # xbmc.log(f"\t{uris[0]}", xbmc.LOGINFO)
+    # xbmc.log(f"\t{uris[0][1]}", xbmc.LOGINFO)
+    addDirectoryItems(ph, uris, items_per_page)
+    # claim_ids_to_directory_items(name, uris)
 
 @plugin.route('/playlist/add/<name>/<uri>')
 def plugin_playlist_add(name,uri):

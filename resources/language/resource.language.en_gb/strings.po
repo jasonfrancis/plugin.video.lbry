@@ -263,3 +263,7 @@ msgstr ""
 msgctxt "#30246"
 msgid "Login"
 msgstr ""
+
+msgctxt "#30247"
+msgid "Favorites"
+msgstr "Favorites"
