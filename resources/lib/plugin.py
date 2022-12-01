@@ -192,7 +192,7 @@ def to_video_listitem(item, playlist='', channel='', repost=None):
     infoLabels['plot'] = plot
     li.setInfo('video', infoLabels)
     li.addContextMenuItems(menu)
-    xbmc.log("\t\tLeaving to_video_listitem()", xbmc.LOGINFO)
+    
     return li
 
 def result_to_itemlist(result, playlist='', channel=''):
@@ -758,28 +758,24 @@ def load_api_builtin_collections(collectionName):
     return result
 
 def load_api_playlist(name:str, page:int):
-    xbmc.log(f"\tload_api_playlist(\"{name}\", {page})", xbmc.LOGINFO)
     # ensure page is an int for API calls
     page = page if isinstance(page, int) else int(page)
-    xbmc.log(f"\tA {page}", xbmc.LOGINFO)
+    
     playlist_result = call_rpc("collection_resolve", { "claim_id": name, "page": page, "page_size": items_per_page })
-    xbmc.log(f"\tB", xbmc.LOGINFO)
+    
     if("items" not in playlist_result):
         xbmc.log(f"load_api_playlist({name}, {page}) got a result with no 'items' in the result JSON.", xbmc.LOGERROR)
         dialog.notification("Playlists", "Unexpected result from API.", NOTIFICATION_ERROR)
         raise "Unexpected JSON from API."
-   
-    xbmc.log(f"\tC", xbmc.LOGINFO)
+    
     result = result_to_itemlist(playlist_result["items"], name)
-   
-    xbmc.log(f"\tRecords found: {len(result)}", xbmc.LOGINFO)
+    
     addDirectoryItems(ph, result, items_per_page)
 
-    # If this is not the next page we need to include a link to the next page of results.
+    # If this is not the last page we need to include a link to the next page of results.
     if(int(page) < int(playlist_result["total_pages"])):
         playlistPath = plugin.url_for(plugin_playlist, name=name, page=page+1)
         displayName = tr(30203)#"Next Page"
-        xbmc.log(f"Adding directory item: {playlistPath}", xbmc.LOGINFO)
         if not addDirectoryItem(ph, playlistPath, ListItem(displayName), True):
             raise(f"Failed adding directory item: {playlistPath}")
     endOfDirectory(ph)
@@ -794,7 +790,6 @@ def addDirectoryItemsForApiPlaylists():
         raise "Unexpected JSON from API."
     for item in collections_result["items"]:
         playlistPath = plugin.url_for(plugin_playlist, name=item['claim_id'], page=1)
-        xbmc.log(f"Adding directory item: {playlistPath}", xbmc.LOGINFO)
         if not addDirectoryItem(ph, playlistPath, ListItem(item["value"]["title"]), True):
             raise(f"Failed adding directory item: /playlist/list/{item['claim_id']}")
     
