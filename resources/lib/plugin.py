@@ -192,7 +192,7 @@ def to_video_listitem(item, playlist='', channel='', repost=None):
     infoLabels['plot'] = plot
     li.setInfo('video', infoLabels)
     li.addContextMenuItems(menu)
-
+    xbmc.log("\t\tLeaving to_video_listitem()", xbmc.LOGINFO)
     return li
 
 def result_to_itemlist(result, playlist='', channel=''):
@@ -209,9 +209,10 @@ def result_to_itemlist(result, playlist='', channel=''):
                 if 'mature' in item['value']['tags'] and not nsfw:
                     xbmc.log("No lewds, dudes.", xbmc.LOGINFO)
                     continue
-            xbmc.log("\tCalling to_video_listitem()", xbmc.LOGINFO)
+            xbmc.log(f"\tCalling to_video_listitem(item, {playlist}, {channel})", xbmc.LOGINFO)
             li = to_video_listitem(item, playlist, channel)
             url = plugin.url_for(claim_play, uri=serialize_uri(item))
+            xbmc.log(f"\turl: {url}", xbmc.LOGINFO)
 
             items.append((url, li))
         elif item['value_type'] == 'repost' and 'reposted_claim' in item and item['reposted_claim']['value_type'] == 'stream' and item['reposted_claim']['value']['stream_type'] == 'video':
@@ -762,7 +763,7 @@ def load_api_playlist(name:str, page:int):
     # ensure page is an int for API calls
     page = page if isinstance(page, int) else int(page)
     xbmc.log(f"\tA {page}", xbmc.LOGINFO)
-    playlist_result = call_rpc("collection_resolve", { "claim_id": name, "page": page })
+    playlist_result = call_rpc("collection_resolve", { "claim_id": name, "page": page, "page_size": 2 })
     xbmc.log(f"\tB", xbmc.LOGINFO)
     if("items" not in playlist_result):
         xbmc.log(f"load_api_playlist({name}, {page}) got a result with no 'items' in the result JSON.", xbmc.LOGERROR)
@@ -773,6 +774,8 @@ def load_api_playlist(name:str, page:int):
     result = result_to_itemlist(playlist_result["items"], name)
    
     xbmc.log(f"\tRecords found: {len(result)}", xbmc.LOGINFO)
+    addDirectoryItems(ph, result, items_per_page)
+    
     # If this is not the next page we need to include a link to the next page of results.
     if(int(page) < int(playlist_result["total_pages"])):
         playlistPath = plugin.url_for(plugin_playlist, name=name, page=page+1)
@@ -780,6 +783,7 @@ def load_api_playlist(name:str, page:int):
         xbmc.log(f"Adding directory item: {playlistPath}", xbmc.LOGINFO)
         if not addDirectoryItem(ph, playlistPath, ListItem(displayName), True):
             raise(f"Failed adding directory item: {playlistPath}")
+    endOfDirectory(ph)
     return result
 
 
@@ -838,10 +842,9 @@ def plugin_playlist(name, page):
     # name = unquote_plus(name)
     # uris = load_playlist(name)
     uris = load_api_playlist(name, page)
-    xbmc.log(f"Adding the {len(uris)} playlist Directory Items.", xbmc.LOGINFO)
     # xbmc.log(f"\t{uris[0]}", xbmc.LOGINFO)
     # xbmc.log(f"\t{uris[0][1]}", xbmc.LOGINFO)
-    addDirectoryItems(ph, uris, items_per_page)
+    
     # claim_ids_to_directory_items(name, uris)
 
 @plugin.route('/playlist/add/<name>/<uri>')
